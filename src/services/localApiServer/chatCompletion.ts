@@ -32,6 +32,7 @@ import {
   toFinalChunk,
   validateChatRequest,
   WireError,
+  wireToolCalls,
 } from './wire';
 
 export interface ResponseChannel extends ResponseSink {
@@ -138,6 +139,15 @@ async function completeStreaming(
     const result = await lease.engine.completion(params, onChunk);
     if (!lease.signal.aborted) {
       sendDeltas(result);
+      // Tool calls go out whole, once the parser has the finished call;
+      // partial arguments mid-stream are not valid JSON for a client.
+      const toolCalls = wireToolCalls(result, ids);
+      if (toolCalls.length > 0) {
+        const delta: ChunkDelta = roleSent ? {} : {role: 'assistant'};
+        delta.tool_calls = toolCalls.map((call, index) => ({...call, index}));
+        roleSent = true;
+        send(toChunk(delta, ids));
+      }
       send(toFinalChunk(result, ids, includeUsage));
       writeSseData(channel, SSE_DONE);
       return;

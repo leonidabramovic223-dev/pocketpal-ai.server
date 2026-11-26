@@ -160,9 +160,122 @@ describe('validateChatRequest and buildChatParams', () => {
     ).toBe(true);
   });
 
+  describe('tools', () => {
+    const tool = {
+      type: 'function',
+      function: {name: 'read_file', parameters: {type: 'object'}},
+    };
+
+    it('passes tools through, defaulting tool_choice to auto', () => {
+      const {params} = mapped({...user, tools: [tool]});
+      expect(params.tools).toEqual([tool]);
+      expect(params.tool_choice).toBe('auto');
+    });
+
+    it('keeps an explicit tool_choice and maps a named function to required', () => {
+      expect(
+        mapped({...user, tools: [tool], tool_choice: 'none'}).params
+          .tool_choice,
+      ).toBe('none');
+      expect(
+        mapped({
+          ...user,
+          tools: [tool],
+          tool_choice: {type: 'function', function: {name: 'read_file'}},
+        }).params.tool_choice,
+      ).toBe('required');
+    });
+
+    it('sends no tools when the list is empty', () => {
+      const {params} = mapped({...user, tools: [], tool_choice: 'auto'});
+      expect(params).not.toHaveProperty('tools');
+      expect(params).not.toHaveProperty('tool_choice');
+    });
+
+    it('rejects a malformed tool', () => {
+      expect(rejected({...user, tools: [{type: 'function'}]})).toMatchObject({
+        status: 400,
+        code: 'invalid_request',
+      });
+    });
+
+    it('rejects an unknown tool_choice', () => {
+      expect(
+        rejected({...user, tools: [tool], tool_choice: 'sometimes'}),
+      ).toMatchObject({status: 400, code: 'invalid_request'});
+    });
+
+    it('keeps assistant tool_calls and tool results in the history', () => {
+      const {params} = mapped({
+        messages: [
+          {role: 'user', content: 'read it'},
+          {
+            role: 'assistant',
+            content: null,
+            tool_calls: [
+              {
+                id: 'call_1',
+                type: 'function',
+                function: {name: 'read_file', arguments: {path: 'a.txt'}},
+              },
+            ],
+          },
+          {role: 'tool', tool_call_id: 'call_1', content: 'hello'},
+        ],
+        tools: [tool],
+      });
+      expect(params.messages).toEqual([
+        {role: 'user', content: 'read it'},
+        {
+          role: 'assistant',
+          content: '',
+          tool_calls: [
+            {
+              id: 'call_1',
+              type: 'function',
+              function: {name: 'read_file', arguments: '{"path":"a.txt"}'},
+            },
+          ],
+        },
+        {role: 'tool', content: 'hello', tool_call_id: 'call_1'},
+      ]);
+    });
+
+    it('rejects a tool message without a tool_call_id', () => {
+      expect(
+        rejected({messages: [{role: 'tool', content: 'x'}]}),
+      ).toMatchObject({status: 400, code: 'invalid_request'});
+    });
+
+    it('answers with tool_calls and finish_reason tool_calls', () => {
+      const ids = newCompletionIds('m', 0);
+      const completion = toCompletion(
+        {
+          text: '',
+          content: '',
+          tool_calls: [
+            {
+              type: 'function',
+              function: {name: 'read_file', arguments: '{"path":"a"}'},
+            },
+          ],
+        } as CompletionResult,
+        ids,
+      );
+      const choice = completion.choices[0];
+      expect(choice.finish_reason).toBe('tool_calls');
+      expect(choice.message.content).toBeNull();
+      expect(choice.message.tool_calls).toEqual([
+        {
+          id: expect.stringMatching(/^call_/),
+          type: 'function',
+          function: {name: 'read_file', arguments: '{"path":"a"}'},
+        },
+      ]);
+    });
+  });
+
   it.each([
-    [{tools: [{type: 'function'}]}, 'tools'],
-    [{tool_choice: 'auto'}, 'tool_choice'],
     [{n: 2}, 'n'],
     [{logprobs: true}, 'logprobs'],
     [
@@ -186,7 +299,7 @@ describe('validateChatRequest and buildChatParams', () => {
     ['a non-object body', []],
     ['missing messages', {}],
     ['empty messages', {messages: []}],
-    ['an unknown role', {messages: [{role: 'tool', content: 'x'}]}],
+    ['an unknown role', {messages: [{role: 'robot', content: 'x'}]}],
     ['non-string content', {messages: [{role: 'user', content: 3}]}],
     ['a non-numeric temperature', {...user, temperature: 'hot'}],
     ['a non-string stop', {...user, stop: [1]}],
