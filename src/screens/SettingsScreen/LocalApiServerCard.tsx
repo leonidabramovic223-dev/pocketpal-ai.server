@@ -16,7 +16,7 @@ import {Divider, Sheet, TextInput} from '../../components';
 import {useTheme} from '../../hooks';
 import {t} from '../../locales';
 import type {Translations} from '../../locales/types';
-import {openPlus} from '../../services/plus/gate';
+import {isPlusUnlocked, openPlus} from '../../services/plus/gate';
 import {
   isValidLocalApiPort,
   LocalApiServerError,
@@ -58,8 +58,7 @@ export const LocalApiServerCard: React.FC = observer(() => {
   }, [store.status, store.port]);
 
   const editable = store.status === 'stopped';
-  // Personal fork: the local API server is not gated behind Plus.
-  const locked = false;
+  const locked = !isPlusUnlocked();
   const servedModel = store.servedModelId ? modelStore.activeModel : undefined;
 
   const commitPort = (): boolean => {

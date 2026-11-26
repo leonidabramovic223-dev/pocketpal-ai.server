@@ -347,6 +347,67 @@ describe('LocalApiServerStore lifecycle', () => {
     expect(createdServers).toHaveLength(0);
   });
 
+  describe('behind Plus', () => {
+    const lock = () =>
+      runInAction(() => {
+        mockPurchaseStore.plusUnlocked = false;
+      });
+
+    it('does not enable or listen while Plus is locked', async () => {
+      lock();
+      store.setEnabled(true);
+      await flush();
+      expect(store.enabled).toBe(false);
+      expect(store.status).toBe('stopped');
+      expect(createdServers).toHaveLength(0);
+
+      appStateListener('active');
+      await flush();
+      expect(createdServers).toHaveLength(0);
+    });
+
+    it('starts once Plus is unlocked', async () => {
+      lock();
+      store.setEnabled(true);
+      runInAction(() => {
+        mockPurchaseStore.plusUnlocked = true;
+      });
+      await startRunning();
+      expect(store.enabled).toBe(true);
+      expect(store.status).toBe('running');
+    });
+
+    it('keeps running when Plus is lost', async () => {
+      await startRunning();
+      lock();
+      appStateListener('active');
+      await flush();
+      expect(store.enabled).toBe(true);
+      expect(store.status).toBe('running');
+      expect(createdServers).toHaveLength(1);
+    });
+
+    it('turns off while Plus is locked', async () => {
+      const server = await startRunning();
+      lock();
+      store.setEnabled(false);
+      expect(store.enabled).toBe(false);
+      expect(store.status).toBe('stopped');
+      expect(server.close).toHaveBeenCalled();
+    });
+
+    it('starts without Plus in a build without the store gate', async () => {
+      lock();
+      (global as any).__PLUS_STORE_GATE__ = false;
+      try {
+        await startRunning();
+        expect(store.status).toBe('running');
+      } finally {
+        (global as any).__PLUS_STORE_GATE__ = true;
+      }
+    });
+  });
+
   describe('returning to the foreground', () => {
     it('restarts a running listener on iOS after a background', async () => {
       Platform.OS = 'ios';
