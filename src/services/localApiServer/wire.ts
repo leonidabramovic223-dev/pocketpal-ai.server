@@ -406,6 +406,11 @@ export function usageOf(result: CompletionResult) {
 
 export function toCompletion(result: CompletionResult, ids: CompletionIds) {
   const toolCalls = wireToolCalls(result, ids);
+  // result.text is the raw model output, markup included. When llama.rn has
+  // already split the turn into reasoning and tool calls, falling back to it
+  // would repeat them as literal text in content.
+  const parsedAway = Boolean(result.reasoning_content) || toolCalls.length > 0;
+  const content = result.content ?? (parsedAway ? '' : result.text);
   return {
     id: ids.id,
     object: 'chat.completion',
@@ -416,10 +421,7 @@ export function toCompletion(result: CompletionResult, ids: CompletionIds) {
         index: 0,
         message: {
           role: 'assistant',
-          content:
-            toolCalls.length > 0 && !(result.content ?? result.text)
-              ? null
-              : (result.content ?? result.text),
+          content: toolCalls.length > 0 && !content ? null : content,
           ...(result.reasoning_content
             ? {reasoning_content: result.reasoning_content}
             : {}),

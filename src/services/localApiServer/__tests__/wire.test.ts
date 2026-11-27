@@ -247,6 +247,24 @@ describe('validateChatRequest and buildChatParams', () => {
       ).toMatchObject({status: 400, code: 'invalid_request'});
     });
 
+    it('does not repeat raw tool-call markup in content', () => {
+      const completion = toCompletion(
+        {
+          text: '<|channel>thought\nx<channel|><|tool_call>call:read_file{}<tool_call|>',
+          reasoning_content: 'x',
+          tool_calls: [
+            {
+              type: 'function',
+              function: {name: 'read_file', arguments: '{}'},
+            },
+          ],
+        } as CompletionResult,
+        newCompletionIds('m', 0),
+      );
+      expect(completion.choices[0].message.content).toBeNull();
+      expect(completion.choices[0].message.reasoning_content).toBe('x');
+    });
+
     it('answers with tool_calls and finish_reason tool_calls', () => {
       const ids = newCompletionIds('m', 0);
       const completion = toCompletion(
